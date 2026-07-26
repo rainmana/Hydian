@@ -404,4 +404,27 @@ mod tests {
             assert_eq!(plan.hydian_home, paths.home);
         }
     }
+
+    #[test]
+    fn windows_task_uses_utf8_and_an_external_command_path() {
+        let directory = TempDir::new().unwrap();
+        let executable = std::env::current_exe().unwrap();
+        let paths = HydianPaths::resolve(Some(directory.path()), None, None).unwrap();
+        let plan = plan(ServicePlatform::Windows, false, &executable, &paths).unwrap();
+        assert!(
+            plan.definition
+                .starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+        );
+        assert!(!plan.executable.to_string_lossy().starts_with(r"\\?\"));
+        assert!(plan.semantics.contains("no password"));
+    }
+
+    #[test]
+    fn windows_system_mode_is_not_overclaimed() {
+        let directory = TempDir::new().unwrap();
+        let executable = std::env::current_exe().unwrap();
+        let paths = HydianPaths::resolve(Some(directory.path()), None, None).unwrap();
+        let error = plan(ServicePlatform::Windows, true, &executable, &paths).unwrap_err();
+        assert!(error.to_string().contains("not implemented"));
+    }
 }
