@@ -20,7 +20,6 @@ use crate::{
     secrets::redact_json,
 };
 
-#[allow(clippy::unused_async)]
 pub async fn run(cli: Cli) -> Result<()> {
     let printer = Printer::from_cli(&cli);
     let paths = HydianPaths::resolve(
@@ -126,12 +125,10 @@ pub async fn run(cli: Cli) -> Result<()> {
             );
             Ok(())
         }
-        Some(Command::Serve(_)) => {
-            bail!("the gateway runtime is not available in this build milestone")
+        Some(Command::Serve(arguments)) => {
+            run_serve(&printer, &paths, profile_override.as_deref(), arguments.tui).await
         }
-        Some(Command::Stdio) => {
-            bail!("the MCP stdio frontend is not available in this build milestone")
-        }
+        Some(Command::Stdio) => run_stdio(&paths, profile_override.as_deref()).await,
         Some(Command::Tui) => {
             bail!("the terminal interface is not available in this build milestone")
         }
@@ -141,7 +138,60 @@ pub async fn run(cli: Cli) -> Result<()> {
         Some(Command::Expose(_)) => {
             bail!("exposure providers are not available in this build milestone")
         }
+        #[cfg(debug_assertions)]
+        Some(Command::Fixture(arguments)) => crate::fixture::run(arguments).await,
     }
+}
+
+async fn load_runtime(
+    paths: &HydianPaths,
+    profile: Option<&str>,
+) -> Result<std::sync::Arc<crate::runtime::Runtime>> {
+    paths.create_directories()?;
+    let config = HydianConfig::load(&paths.config)?;
+    let mcp = load_mcp_config(&paths.mcp_config)?;
+    crate::runtime::Runtime::start(config, mcp, paths.clone(), profile).await
+}
+
+async fn run_serve(
+    printer: &Printer,
+    paths: &HydianPaths,
+    profile: Option<&str>,
+    with_tui: bool,
+) -> Result<()> {
+    if with_tui {
+        bail!("`hydian serve --tui` is not available until the operational TUI milestone");
+    }
+    let runtime = load_runtime(paths, profile).await?;
+    let frontend = crate::frontend::streamable_http::start(runtime.clone()).await?;
+    let status = runtime.status().await;
+    runtime.write_status().await?;
+    printer.success(
+        "serve",
+        &json!({
+            "endpoint": status.endpoint,
+            "state": status.state,
+            "address": frontend.address,
+            "status_file": paths.status,
+        }),
+        &[
+            format!("✓ READY: Hydian is listening at {}", status.endpoint),
+            format!("STATE: {:?}", status.state).to_uppercase(),
+            format!("STATUS: http://{}/status", frontend.address),
+            "Press Ctrl+C to stop.".into(),
+        ],
+    );
+    tokio::signal::ctrl_c()
+        .await
+        .context("could not listen for Ctrl+C")?;
+    frontend.shutdown().await?;
+    runtime.shutdown().await;
+    Ok(())
+}
+
+async fn run_stdio(paths: &HydianPaths, profile: Option<&str>) -> Result<()> {
+    let runtime = load_runtime(paths, profile).await?;
+    crate::frontend::stdio::serve(runtime).await
 }
 
 fn print_help() -> Result<()> {

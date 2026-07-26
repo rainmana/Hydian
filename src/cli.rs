@@ -88,6 +88,9 @@ pub enum Command {
     Explain(ExplainArgs),
     /// Generate a shell completion script.
     Completion(CompletionArgs),
+    #[cfg(debug_assertions)]
+    #[command(hide = true)]
+    Fixture(FixtureArgs),
 }
 
 #[derive(Debug, Clone, Args)]
@@ -324,4 +327,34 @@ pub enum ExplainTopic {
 pub struct CompletionArgs {
     #[arg(value_enum)]
     pub shell: Shell,
+}
+
+#[cfg(debug_assertions)]
+#[derive(Debug, Clone, Args)]
+pub struct FixtureArgs {
+    #[arg(value_enum)]
+    pub transport: FixtureTransport,
+    #[arg(long, default_value = "fixture")]
+    pub label: String,
+    #[arg(long, value_enum, default_value_t = FixtureBehavior::Normal)]
+    pub behavior: FixtureBehavior,
+    #[arg(long, default_value = "127.0.0.1:0")]
+    pub listen: String,
+}
+
+#[cfg(debug_assertions)]
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum FixtureTransport {
+    Stdio,
+    Http,
+}
+
+#[cfg(debug_assertions)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum FixtureBehavior {
+    Normal,
+    FailStartup,
+    ExitAfterOne,
+    ListChanged,
+    Slow,
 }

@@ -385,12 +385,14 @@ impl Default for ProfileConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct SecurityConfig {
     pub validate_origin: bool,
+    pub allowed_origins: Vec<String>,
 }
 
 impl Default for SecurityConfig {
     fn default() -> Self {
         Self {
             validate_origin: true,
+            allowed_origins: Vec::new(),
         }
     }
 }
