@@ -180,6 +180,30 @@ async fn http_frontend_lists_and_calls_the_shared_catalog() -> Result<()> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let frontend = streamable_http::start_with_listener(runtime.clone(), listener)?;
     let url = format!("http://{}/mcp", frontend.address);
+    let http = reqwest::Client::new();
+    assert!(
+        http.get(format!("http://{}/healthz", frontend.address))
+            .send()
+            .await?
+            .status()
+            .is_success()
+    );
+    let ready: serde_json::Value = http
+        .get(format!("http://{}/readyz", frontend.address))
+        .send()
+        .await?
+        .json()
+        .await?;
+    assert_eq!(ready["ready"], true);
+    let forbidden = http
+        .post(&url)
+        .header("Origin", "https://attacker.example")
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .json(&json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}))
+        .send()
+        .await?;
+    assert_eq!(forbidden.status(), reqwest::StatusCode::FORBIDDEN);
     let client = ClientInfo::default()
         .serve(StreamableHttpClientTransport::from_uri(url))
         .await?;

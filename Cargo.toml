@@ -17,6 +17,7 @@ axum = "0.8.9"
 chrono = { version = "0.4.42", default-features = false, features = ["clock", "serde"] }
 clap = { version = "4.6.4", features = ["derive", "env"] }
 clap_complete = "4.6.7"
+crossterm = "0.29.0"
 directories = "6.0.0"
 futures = "0.3.31"
 http = "1.4.0"

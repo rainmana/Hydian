@@ -22,6 +22,7 @@ use crate::{
 
 pub async fn run(cli: Cli) -> Result<()> {
     let printer = Printer::from_cli(&cli);
+    let plain_requested = cli.plain;
     let paths = HydianPaths::resolve(
         cli.home.as_deref(),
         cli.config.as_deref(),
@@ -30,7 +31,13 @@ pub async fn run(cli: Cli) -> Result<()> {
     let profile_override = cli.profile.clone();
 
     match cli.command {
-        None => print_help(),
+        None => {
+            if crate::tui::default_launch_allowed(plain_requested) {
+                run_tui_gateway(&paths, profile_override.as_deref()).await
+            } else {
+                print_help()
+            }
+        }
         Some(Command::Init(arguments)) => {
             run_init(&printer, &paths, arguments.dry_run, arguments.force)
         }
@@ -69,7 +76,9 @@ pub async fn run(cli: Cli) -> Result<()> {
                 } else {
                     "doctor --strict treats warnings as failures"
                 };
-                printer.success("doctor", &report, &human);
+                if !printer.is_json() {
+                    printer.success("doctor", &report, &human);
+                }
                 bail!("{reason}");
             }
             printer.success("doctor", &report, &human);
@@ -129,28 +138,29 @@ pub async fn run(cli: Cli) -> Result<()> {
             run_serve(&printer, &paths, profile_override.as_deref(), arguments.tui).await
         }
         Some(Command::Stdio) => run_stdio(&paths, profile_override.as_deref()).await,
-        Some(Command::Tui) => {
-            bail!("the terminal interface is not available in this build milestone")
-        }
-        Some(Command::Service(_)) => {
-            bail!("service management is not available in this build milestone")
-        }
-        Some(Command::Expose(_)) => {
-            bail!("exposure providers are not available in this build milestone")
-        }
+        Some(Command::Tui) => run_tui_gateway(&paths, profile_override.as_deref()).await,
+        Some(Command::Service(arguments)) => run_service(&printer, &paths, arguments.command).await,
+        Some(Command::Expose(arguments)) => run_exposure(&printer, &paths, arguments.command).await,
         #[cfg(debug_assertions)]
         Some(Command::Fixture(arguments)) => crate::fixture::run(arguments).await,
     }
 }
 
-async fn load_runtime(
-    paths: &HydianPaths,
-    profile: Option<&str>,
-) -> Result<std::sync::Arc<crate::runtime::Runtime>> {
+struct LoadedRuntime {
+    runtime: std::sync::Arc<crate::runtime::Runtime>,
+    _log_guard: tracing_appender::non_blocking::WorkerGuard,
+}
+
+async fn load_runtime(paths: &HydianPaths, profile: Option<&str>) -> Result<LoadedRuntime> {
     paths.create_directories()?;
     let config = HydianConfig::load(&paths.config)?;
+    let log_guard = crate::logging::init(&config, &paths.logs)?;
     let mcp = load_mcp_config(&paths.mcp_config)?;
-    crate::runtime::Runtime::start(config, mcp, paths.clone(), profile).await
+    let runtime = crate::runtime::Runtime::start(config, mcp, paths.clone(), profile).await?;
+    Ok(LoadedRuntime {
+        runtime,
+        _log_guard: log_guard,
+    })
 }
 
 async fn run_serve(
@@ -159,39 +169,283 @@ async fn run_serve(
     profile: Option<&str>,
     with_tui: bool,
 ) -> Result<()> {
-    if with_tui {
-        bail!("`hydian serve --tui` is not available until the operational TUI milestone");
-    }
-    let runtime = load_runtime(paths, profile).await?;
+    let loaded = load_runtime(paths, profile).await?;
+    let runtime = loaded.runtime.clone();
     let frontend = crate::frontend::streamable_http::start(runtime.clone()).await?;
     let status = runtime.status().await;
     runtime.write_status().await?;
-    printer.success(
-        "serve",
-        &json!({
-            "endpoint": status.endpoint,
-            "state": status.state,
-            "address": frontend.address,
-            "status_file": paths.status,
-        }),
-        &[
-            format!("✓ READY: Hydian is listening at {}", status.endpoint),
-            format!("STATE: {:?}", status.state).to_uppercase(),
-            format!("STATUS: http://{}/status", frontend.address),
-            "Press Ctrl+C to stop.".into(),
-        ],
-    );
-    tokio::signal::ctrl_c()
-        .await
-        .context("could not listen for Ctrl+C")?;
+    if with_tui {
+        crate::tui::run(runtime.clone(), paths).await?;
+    } else {
+        printer.success(
+            "serve",
+            &json!({
+                "endpoint": status.endpoint,
+                "state": status.state,
+                "address": frontend.address,
+                "status_file": paths.status,
+            }),
+            &[
+                format!("✓ READY: Hydian is listening at {}", status.endpoint),
+                format!("STATE: {:?}", status.state).to_uppercase(),
+                format!("STATUS: http://{}/status", frontend.address),
+                "Press Ctrl+C to stop.".into(),
+            ],
+        );
+        tokio::signal::ctrl_c()
+            .await
+            .context("could not listen for Ctrl+C")?;
+    }
     frontend.shutdown().await?;
     runtime.shutdown().await;
     Ok(())
 }
 
 async fn run_stdio(paths: &HydianPaths, profile: Option<&str>) -> Result<()> {
-    let runtime = load_runtime(paths, profile).await?;
-    crate::frontend::stdio::serve(runtime).await
+    let loaded = load_runtime(paths, profile).await?;
+    crate::frontend::stdio::serve(loaded.runtime).await
+}
+
+async fn run_tui_gateway(paths: &HydianPaths, profile: Option<&str>) -> Result<()> {
+    let loaded = load_runtime(paths, profile).await?;
+    let runtime = loaded.runtime.clone();
+    let frontend = crate::frontend::streamable_http::start(runtime.clone()).await?;
+    runtime.write_status().await?;
+    let result = crate::tui::run(runtime.clone(), paths).await;
+    let frontend_result = frontend.shutdown().await;
+    runtime.shutdown().await;
+    result.and(frontend_result)
+}
+
+async fn run_service(
+    printer: &Printer,
+    paths: &HydianPaths,
+    command: crate::cli::ServiceCommand,
+) -> Result<()> {
+    use crate::cli::ServiceCommand;
+    let (system, dry_run) = match &command {
+        ServiceCommand::Install {
+            system, dry_run, ..
+        }
+        | ServiceCommand::Uninstall { system, dry_run }
+        | ServiceCommand::Start { system, dry_run }
+        | ServiceCommand::Stop { system, dry_run }
+        | ServiceCommand::Restart { system, dry_run } => (*system, *dry_run),
+        ServiceCommand::Status { system } => (*system, false),
+    };
+    let plan = crate::service::current_plan(system, paths)?;
+    let commands = match &command {
+        ServiceCommand::Install { .. } => plan.install_commands.clone(),
+        ServiceCommand::Uninstall { .. } => plan.uninstall_commands.clone(),
+        ServiceCommand::Start { .. } => vec![plan.start_command.clone()],
+        ServiceCommand::Stop { .. } => vec![plan.stop_command.clone()],
+        ServiceCommand::Restart { .. } => {
+            vec![plan.stop_command.clone(), plan.start_command.clone()]
+        }
+        ServiceCommand::Status { .. } => vec![plan.status_command.clone()],
+    };
+    let action = match &command {
+        ServiceCommand::Install { .. } => "install",
+        ServiceCommand::Uninstall { .. } => "uninstall",
+        ServiceCommand::Start { .. } => "start",
+        ServiceCommand::Stop { .. } => "stop",
+        ServiceCommand::Restart { .. } => "restart",
+        ServiceCommand::Status { .. } => "status",
+    };
+    let output = if dry_run {
+        None
+    } else {
+        match command {
+            ServiceCommand::Install {
+                acknowledge_temporary_path,
+                ..
+            } => {
+                if crate::service::is_temporary_path(&plan.executable)
+                    && !acknowledge_temporary_path
+                {
+                    bail!(
+                        "refusing to install a service from temporary executable {}; move Hydian to a stable path or pass --acknowledge-temporary-path",
+                        plan.executable.display()
+                    );
+                }
+                crate::service::install(&plan).await?;
+                Some("service definition installed and verified".into())
+            }
+            ServiceCommand::Uninstall { .. } => {
+                crate::service::uninstall(&plan).await?;
+                Some("service definition removed".into())
+            }
+            ServiceCommand::Start { .. } => {
+                Some(crate::service::execute(&plan.start_command).await?)
+            }
+            ServiceCommand::Stop { .. } => Some(crate::service::execute(&plan.stop_command).await?),
+            ServiceCommand::Restart { .. } => {
+                let _ = crate::service::execute(&plan.stop_command).await;
+                Some(crate::service::execute(&plan.start_command).await?)
+            }
+            ServiceCommand::Status { .. } => {
+                Some(crate::service::execute(&plan.status_command).await?)
+            }
+        }
+    };
+    let mut human = vec![
+        if dry_run {
+            format!("PREVIEW: service {action}")
+        } else {
+            format!("✓ READY: service {action}")
+        },
+        format!("PLATFORM: {:?}", plan.platform),
+        format!("SEMANTICS: {}", plan.semantics),
+        format!("EXECUTABLE: {}", plan.executable.display()),
+        format!("HYDIAN HOME: {}", plan.hydian_home.display()),
+        format!("DEFINITION: {}", plan.definition_path.display()),
+        format!("CONFIGURATION: {}", plan.configuration_path.display()),
+        format!("LOGS: {}", plan.log_path.display()),
+    ];
+    human.extend(
+        commands
+            .iter()
+            .map(|command| format!("COMMAND: {}", crate::service::display_command(command))),
+    );
+    if let Some(output) = &output {
+        human.push(format!("RESULT: {output}"));
+    }
+    printer.success(
+        &format!("service {action}"),
+        &json!({"dry_run": dry_run, "plan": plan, "commands": commands, "result": output}),
+        &human,
+    );
+    Ok(())
+}
+
+async fn run_exposure(
+    printer: &Printer,
+    paths: &HydianPaths,
+    command: crate::cli::ExposeCommand,
+) -> Result<()> {
+    use crate::{
+        cli::ExposeCommand,
+        exposure::{CommandProvider, ExposureProvider},
+    };
+    let config = HydianConfig::load(&paths.config)?;
+    let is_start_command = matches!(&command, ExposeCommand::Start(_));
+    match command {
+        ExposeCommand::Plan(arguments) | ExposeCommand::Start(arguments) => {
+            let provider = CommandProvider::new(&arguments.provider);
+            let plan = provider
+                .plan(
+                    &config,
+                    arguments.scope.as_deref(),
+                    arguments.mode.as_deref(),
+                    &arguments.provider_args,
+                )
+                .await?;
+            let should_start = is_start_command && !arguments.dry_run;
+            let state = if should_start {
+                paths.create_directories()?;
+                Some(provider.start(&plan, paths).await?)
+            } else {
+                None
+            };
+            let mut human = vec![
+                if should_start {
+                    format!("✓ READY: {} exposure started", plan.provider)
+                } else {
+                    format!("PREVIEW: {} exposure", plan.provider)
+                },
+                format!(
+                    "EXECUTABLE: {}",
+                    plan.detection.executable.as_ref().map_or_else(
+                        || "<provider command>".into(),
+                        |path| path.display().to_string()
+                    )
+                ),
+                format!(
+                    "VERSION: {}",
+                    plan.detection.version.as_deref().unwrap_or("unavailable")
+                ),
+                format!("LOCAL ENDPOINT: {}", plan.local_url),
+                format!("COMMAND: {}", plan.command_display),
+                format!("SCOPE: {}", plan.expected_scope),
+                format!("AUTHENTICATION: {}", plan.authentication),
+                format!("TLS: {}", plan.tls),
+                format!("EXPERIMENTAL: {}", plan.experimental),
+            ];
+            human.extend(
+                plan.limitations
+                    .iter()
+                    .map(|limitation| format!("LIMITATION: {limitation}")),
+            );
+            if let Some(state) = &state {
+                human.push(format!(
+                    "PUBLIC URL: {}",
+                    state.public_url.as_deref().unwrap_or("not available")
+                ));
+            }
+            printer.success(
+                if should_start {
+                    "expose start"
+                } else {
+                    "expose plan"
+                },
+                &json!({"plan": plan, "started": should_start, "state": state}),
+                &human,
+            );
+            Ok(())
+        }
+        ExposeCommand::Stop(arguments) => {
+            let state = if let Some(provider) = &arguments.provider {
+                CommandProvider::new(provider).status(paths).await?
+            } else {
+                crate::exposure::CommandProvider::new("custom")
+                    .status(paths)
+                    .await?
+            };
+            let name = arguments
+                .provider
+                .or_else(|| state.as_ref().map(|state| state.provider.clone()))
+                .unwrap_or_else(|| "custom".into());
+            if !arguments.dry_run {
+                CommandProvider::new(&name).stop(paths).await?;
+            }
+            printer.success(
+                "expose stop",
+                &json!({"provider": name, "dry_run": arguments.dry_run, "previous_state": state}),
+                &[
+                    if arguments.dry_run {
+                        format!("PREVIEW: stop {name} exposure")
+                    } else {
+                        format!("✓ READY: {name} exposure stopped")
+                    },
+                    format!("STATUS FILE: {}", paths.run.join("exposure.json").display()),
+                ],
+            );
+            Ok(())
+        }
+        ExposeCommand::Status => {
+            let state = CommandProvider::new("custom").status(paths).await?;
+            printer.success(
+                "expose status",
+                &state,
+                &[state.as_ref().map_or_else(
+                    || "• STOPPED: no Hydian-managed exposure".into(),
+                    |state| {
+                        format!(
+                            "{}: {} {}",
+                            if state.running {
+                                "✓ RUNNING"
+                            } else {
+                                "! STOPPED"
+                            },
+                            state.provider,
+                            state.public_url.as_deref().unwrap_or("")
+                        )
+                    },
+                )],
+            );
+            Ok(())
+        }
+    }
 }
 
 fn print_help() -> Result<()> {

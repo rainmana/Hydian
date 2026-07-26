@@ -92,12 +92,25 @@ pub fn redact_json(value: &Value) -> Value {
 
 #[must_use]
 pub fn redact_text(input: &str, known_values: &[String]) -> String {
-    known_values
+    let replaced = known_values
         .iter()
         .filter(|value| value.len() >= 4)
         .fold(input.to_owned(), |text, value| {
             text.replace(value, REDACTED)
+        });
+    if let Ok(value) = serde_json::from_str::<Value>(&replaced) {
+        return serde_json::to_string(&redact_json(&value)).unwrap_or(replaced);
+    }
+    replaced
+        .split_whitespace()
+        .map(|token| {
+            token
+                .split_once('=')
+                .filter(|(key, _)| is_secret_key(key))
+                .map_or_else(|| token.to_owned(), |(key, _)| format!("{key}={REDACTED}"))
         })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[must_use]
