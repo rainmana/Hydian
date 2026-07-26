@@ -557,7 +557,7 @@ fn read_state(paths: &HydianPaths) -> Result<Option<ExposureState>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CommandProvider, ExposureProvider};
+    use super::{CommandProvider, ExposureProvider, redact_command};
     use crate::config::HydianConfig;
 
     #[tokio::test]
@@ -605,5 +605,20 @@ mod tests {
             .validate(None, None, &["--authtoken=secret".into()])
             .unwrap_err();
         assert!(error.to_string().contains("credential store"));
+    }
+
+    #[test]
+    fn provider_command_state_redacts_likely_secret_arguments() {
+        let redacted = redact_command(&[
+            "tunnel".into(),
+            "--token".into(),
+            "secret-value".into(),
+            "--password=another-secret".into(),
+            "--url".into(),
+            "example.test".into(),
+        ]);
+        assert_eq!(redacted[2], "[REDACTED]");
+        assert_eq!(redacted[3], "--password=[REDACTED]");
+        assert_eq!(redacted[5], "example.test");
     }
 }
