@@ -35,5 +35,22 @@ fake process executors.
 - Add focused tests for behavior changes.
 - Avoid drive-by formatting and unrelated refactors.
 
+## Maintainer release process
+
+Releases use an explicit semantic version tag as the publication boundary.
+Before tagging, update `Cargo.toml` and `CHANGELOG.md`, run the development
+checks, commit the release source, and push it to `main`.
+
+```text
+git tag -a v0.1.0 -m "Hydian v0.1.0"
+git push origin v0.1.0
+```
+
+The Release workflow verifies that the tag matches the crate version, runs
+formatting, Clippy, and tests, builds six native target archives, generates
+SHA-256 checksums, and publishes or updates the corresponding GitHub release.
+The manual workflow-dispatch path rebuilds an existing tag; it does not create
+or move tags.
+
 By contributing, you agree that your contribution may be licensed under the
 MIT OR Apache-2.0 terms used by this project.
