@@ -346,8 +346,10 @@ fn current_uid() -> String {
             .output()
             .ok()
             .filter(|output| output.status.success())
-            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
-            .unwrap_or_else(|| "501".into())
+            .map_or_else(
+                || "501".into(),
+                |output| String::from_utf8_lossy(&output.stdout).trim().to_owned(),
+            )
     })
 }
 

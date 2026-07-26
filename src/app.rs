@@ -102,13 +102,16 @@ pub async fn run(cli: Cli) -> Result<()> {
             );
             Ok(())
         }
-        Some(Command::Profiles(arguments)) => run_profiles(
-            &printer,
-            &paths,
-            profile_override.as_deref(),
-            arguments.command,
-        ),
-        Some(Command::Servers(arguments)) => run_servers(&printer, &paths, arguments.command),
+        Some(Command::Profiles(arguments)) => {
+            run_profiles(
+                &printer,
+                &paths,
+                profile_override.as_deref(),
+                arguments.command,
+            )
+            .await
+        }
+        Some(Command::Servers(arguments)) => run_servers(&printer, &paths, arguments.command).await,
         Some(Command::Tools(arguments)) => run_tools(&printer, &paths, arguments.command),
         Some(Command::Status) => run_status(&printer, &paths),
         Some(Command::Explain(arguments)) => {
@@ -530,7 +533,7 @@ fn run_init(printer: &Printer, paths: &HydianPaths, dry_run: bool, force: bool) 
     Ok(())
 }
 
-fn run_profiles(
+async fn run_profiles(
     printer: &Printer,
     paths: &HydianPaths,
     profile_override: Option<&str>,
@@ -573,6 +576,9 @@ fn run_profiles(
         }
         ProfileCommand::Use { name, dry_run } => {
             let outcome = use_profile(&mut config, paths, &name, dry_run)?;
+            if !dry_run {
+                let _ = notify_profile_change(&config, &name).await;
+            }
             let mut human = vec![
                 if dry_run {
                     "PREVIEW: active profile change".into()
@@ -598,7 +604,7 @@ fn run_profiles(
     Ok(())
 }
 
-fn run_servers(printer: &Printer, paths: &HydianPaths, command: ServerCommand) -> Result<()> {
+async fn run_servers(printer: &Printer, paths: &HydianPaths, command: ServerCommand) -> Result<()> {
     let config = load_mcp_config(&paths.mcp_config)?;
     match command {
         ServerCommand::List => {
@@ -650,26 +656,96 @@ fn run_servers(printer: &Printer, paths: &HydianPaths, command: ServerCommand) -
             Ok(())
         }
         ServerCommand::Start(arguments) => {
-            runtime_mutation("start", &arguments.name, arguments.dry_run)
+            runtime_mutation(printer, paths, "start", &arguments.name, arguments.dry_run).await
         }
         ServerCommand::Stop(arguments) => {
-            runtime_mutation("stop", &arguments.name, arguments.dry_run)
+            runtime_mutation(printer, paths, "stop", &arguments.name, arguments.dry_run).await
         }
         ServerCommand::Restart(arguments) => {
-            runtime_mutation("restart", &arguments.name, arguments.dry_run)
+            runtime_mutation(
+                printer,
+                paths,
+                "restart",
+                &arguments.name,
+                arguments.dry_run,
+            )
+            .await
         }
     }
 }
 
-fn runtime_mutation(action: &str, name: &str, dry_run: bool) -> Result<()> {
+async fn runtime_mutation(
+    printer: &Printer,
+    paths: &HydianPaths,
+    action: &str,
+    name: &str,
+    dry_run: bool,
+) -> Result<()> {
+    let config = HydianConfig::load(&paths.config)?;
+    let mut control_url = control_base(&config, paths)?;
+    control_url
+        .path_segments_mut()
+        .map_err(|()| anyhow!("control endpoint cannot accept path segments"))?
+        .extend(["servers", name, action]);
     if dry_run {
-        println!("PREVIEW: would {action} backend `{name}`");
-        Ok(())
-    } else {
-        bail!(
-            "cannot {action} backend `{name}` because no running Hydian control channel was found"
-        )
+        printer.success(
+            &format!("servers {action}"),
+            &json!({"server": name, "action": action, "dry_run": true, "control_url": control_url.as_str()}),
+            &[
+                format!("PREVIEW: would {action} backend `{name}`"),
+                format!("CONTROL ENDPOINT: {control_url}"),
+                "No runtime state was changed.".into(),
+            ],
+        );
+        return Ok(());
     }
+    let response = reqwest::Client::new()
+        .post(control_url.clone())
+        .send()
+        .await
+        .with_context(|| {
+            format!(
+                "could not reach the running Hydian control endpoint at {control_url}; start `hydian serve`"
+            )
+        })?;
+    let status = response.status();
+    let body: Value = response
+        .json()
+        .await
+        .context("control response was not JSON")?;
+    if status.is_success() {
+        printer.success(
+            &format!("servers {action}"),
+            &body,
+            &[format!("✓ READY: backend `{name}` {action} completed")],
+        );
+        return Ok(());
+    }
+    bail!(
+        "could not {action} backend `{name}`: {}",
+        body["error"].as_str().unwrap_or("control request failed")
+    );
+}
+
+fn control_base(config: &HydianConfig, paths: &HydianPaths) -> Result<reqwest::Url> {
+    let endpoint = reqwest::Url::parse(&config.endpoint())
+        .with_context(|| format!("endpoint in {} is invalid", paths.config.display()))?;
+    endpoint
+        .join("/control/")
+        .context("could not construct local control endpoint")
+}
+
+async fn notify_profile_change(config: &HydianConfig, name: &str) -> Result<()> {
+    let mut url = reqwest::Url::parse(&config.endpoint())?.join("/control/")?;
+    url.path_segments_mut()
+        .map_err(|()| anyhow!("control endpoint cannot accept path segments"))?
+        .extend(["profiles", name]);
+    reqwest::Client::new()
+        .post(url)
+        .send()
+        .await?
+        .error_for_status()?;
+    Ok(())
 }
 
 fn run_tools(printer: &Printer, paths: &HydianPaths, command: ToolCommand) -> Result<()> {

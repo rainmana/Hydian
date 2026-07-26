@@ -12,8 +12,8 @@ Hydian is not an MCP marketplace, an identity provider, a hosted service, an
 enterprise policy platform, or a replacement for MCP servers. It does not
 require Docker or a language runtime other than the Hydian executable itself.
 
-> **Project status:** Hydian is under active development. The v0.1 command and
-> protocol surfaces are not yet released.
+> **Project status:** v0.1 is implemented but not yet published. Treat the
+> configuration surface as pre-release until a tagged release exists.
 
 ## Operating philosophy
 
@@ -23,7 +23,27 @@ Nothing intentional is prohibited merely because it is dangerous.
 Hydian provides safe defaults, precise warnings, and better options. It does
 not take control of the operator's computer away from them.
 
-## Planned v0.1 boundary
+## Five-minute walkthrough
+
+```powershell
+hydian init
+hydian import C:\path\to\existing-mcp.json
+hydian import C:\path\to\existing-mcp.json --apply
+hydian doctor
+hydian serve
+```
+
+The local Streamable HTTP endpoint is:
+
+```text
+http://127.0.0.1:7337/mcp
+```
+
+Running `hydian` in an interactive terminal opens the dashboard. Headless
+operation uses `hydian serve`; command-oriented MCP clients can launch
+`hydian stdio`.
+
+## v0.1 boundary
 
 - One native Rust executable.
 - Local stdio and remote Streamable HTTP backends.
@@ -36,6 +56,96 @@ not take control of the operator's computer away from them.
 - No database, built-in HTTPS termination, web UI, or bundled tunnel agent.
 
 The detailed design is in [docs/architecture.md](docs/architecture.md).
+
+## Client configuration
+
+Current Codex TOML:
+
+```toml
+[mcp_servers.hydian]
+url = "http://127.0.0.1:7337/mcp"
+startup_timeout_sec = 20
+tool_timeout_sec = 120
+```
+
+Claude/Cursor-style command configuration:
+
+```json
+{
+  "mcpServers": {
+    "hydian": {
+      "command": "hydian",
+      "args": ["stdio"]
+    }
+  }
+}
+```
+
+VS Code-style command configuration:
+
+```json
+{
+  "servers": {
+    "hydian": {
+      "type": "stdio",
+      "command": "hydian",
+      "args": ["stdio"]
+    }
+  }
+}
+```
+
+Client formats change. Confirm the format against the client version you use.
+ChatGPT cannot reach a loopback endpoint on your computer directly; see
+[docs/exposure.md](docs/exposure.md) for provider adapters and the OpenAI
+tunnel-client handoff.
+
+## Commands
+
+```text
+hydian init
+hydian import <path> [--format auto|claude|vscode|cursor|codex] [--apply]
+hydian serve [--tui]
+hydian stdio
+hydian tui
+hydian doctor [--strict]
+hydian status
+hydian endpoint [--format url|json|openai]
+hydian servers list|show|start|stop|restart
+hydian tools list|search|show
+hydian profiles list|show|use
+hydian service install|uninstall|start|stop|restart|status
+hydian expose plan|start|stop|status
+hydian explain <topic>
+hydian completion <powershell|bash|zsh|fish>
+```
+
+Every configuration, service, and exposure mutation has a preview/dry-run
+path. `hydian import` requires `--apply`.
+
+## Configuration locations
+
+| Platform | Hydian home |
+| --- | --- |
+| Windows | `%LOCALAPPDATA%\Hydian\` |
+| Linux | `~/.hydian/` |
+| macOS | `~/.hydian/` |
+
+Override the layout with `HYDIAN_HOME` or `--home`. Override the primary files
+with `--config` and `--mcp-config`.
+
+## Limitations
+
+- v0.1 multiplexes tools only.
+- One backend session is shared by all frontend clients.
+- Hydian does not terminate HTTPS or authenticate frontend clients.
+- Exposure behavior and identity guarantees belong to the selected provider.
+- Cloudflare Quick Tunnels are experimental because they do not support SSE.
+- Unavailable backends are isolated, but their tools are unavailable.
+- Large tool catalogs consume client context; use profiles to keep catalogs
+  focused.
+- There is no database, web UI, legacy SSE-only backend, or embedded tunnel
+  agent.
 
 ## License
 

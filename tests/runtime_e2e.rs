@@ -204,6 +204,14 @@ async fn http_frontend_lists_and_calls_the_shared_catalog() -> Result<()> {
         .send()
         .await?;
     assert_eq!(forbidden.status(), reqwest::StatusCode::FORBIDDEN);
+    let control = http
+        .post(format!(
+            "http://{}/control/servers/alpha/restart",
+            frontend.address
+        ))
+        .send()
+        .await?;
+    assert!(control.status().is_success());
     let client = ClientInfo::default()
         .serve(StreamableHttpClientTransport::from_uri(url))
         .await?;

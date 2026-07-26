@@ -55,7 +55,7 @@ sampling callbacks, elicitation, or other client-specific state.
 
 Tools are exposed as `<server>__<tool>`. Each component is sanitized to the MCP
 tool-name guidance while retaining ASCII letters, digits, underscore, hyphen,
-and dot. Hydian rejects collisions after sanitization. The catalog preserves
+dot, and slash. Hydian rejects collisions after sanitization. The catalog preserves
 the backend's original name, description, input schema, optional output schema,
 annotations, and availability.
 

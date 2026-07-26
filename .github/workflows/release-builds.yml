@@ -1,0 +1,50 @@
+name: Release builds
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: hydian-windows-x86_64
+            binary: hydian.exe
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            artifact: hydian-windows-aarch64
+            binary: hydian.exe
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            artifact: hydian-macos-x86_64
+            binary: hydian
+          - os: macos-15
+            target: aarch64-apple-darwin
+            artifact: hydian-macos-aarch64
+            binary: hydian
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: hydian-linux-x86_64
+            binary: hydian
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact: hydian-linux-aarch64
+            binary: hydian
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build --release --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: target/${{ matrix.target }}/release/${{ matrix.binary }}
+          if-no-files-found: error

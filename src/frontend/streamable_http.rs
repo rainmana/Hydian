@@ -3,8 +3,8 @@ use std::{net::SocketAddr, sync::Arc};
 use anyhow::{Context, Result};
 use axum::{
     Json, Router,
-    extract::State,
-    http::StatusCode,
+    extract::{Path, State},
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -75,6 +75,14 @@ pub fn start_with_listener(runtime: Arc<Runtime>, listener: TcpListener) -> Resu
         .route("/healthz", get(health))
         .route("/readyz", get(readiness))
         .route("/status", get(status))
+        .route(
+            "/control/servers/{name}/{action}",
+            axum::routing::post(control_server),
+        )
+        .route(
+            "/control/profiles/{name}",
+            axum::routing::post(control_profile),
+        )
         .nest_service(&mcp_path, service)
         .with_state(runtime);
     let graceful = cancellation.clone();
@@ -108,4 +116,60 @@ async fn readiness(State(runtime): State<Arc<Runtime>>) -> Response {
 
 async fn status(State(runtime): State<Arc<Runtime>>) -> Json<crate::runtime::RuntimeStatus> {
     Json(runtime.status().await)
+}
+
+async fn control_server(
+    State(runtime): State<Arc<Runtime>>,
+    Path((name, action)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    if !crate::security::validate_origin(&headers, runtime.config()).allowed {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"ok": false, "error": "Origin is not allowed"})),
+        )
+            .into_response();
+    }
+    let result = match action.as_str() {
+        "start" => runtime.start_backend(&name).await,
+        "stop" => runtime.stop_backend(&name).await,
+        "restart" => runtime.restart_backend(&name).await,
+        _ => Err(anyhow::anyhow!(
+            "unknown backend action `{action}`; choose start, stop, or restart"
+        )),
+    };
+    match result {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({"ok": true, "server": name, "action": action})),
+        )
+            .into_response(),
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"ok": false, "error": error.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+async fn control_profile(
+    State(runtime): State<Arc<Runtime>>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if !crate::security::validate_origin(&headers, runtime.config()).allowed {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    match runtime.activate_profile(&name).await {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({"ok": true, "profile": name})),
+        )
+            .into_response(),
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"ok": false, "error": error.to_string()})),
+        )
+            .into_response(),
+    }
 }
