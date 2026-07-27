@@ -11,7 +11,11 @@ use rmcp::{
 };
 
 use super::{BackendClientHandler, BackendConnector, ConnectedBackend};
-use crate::{config::HydianConfig, model::McpServerDefinition, secrets::resolve_headers};
+use crate::{
+    config::{HydianConfig, is_loopback_host},
+    model::McpServerDefinition,
+    secrets::resolve_headers,
+};
 
 #[derive(Debug, Default)]
 pub struct StreamableHttpConnector;
@@ -28,7 +32,7 @@ impl BackendConnector for StreamableHttpConnector {
             .url
             .as_deref()
             .ok_or_else(|| anyhow!("Streamable HTTP backend has no URL"))?;
-        reqwest::Url::parse(uri).context("backend URL is invalid")?;
+        let parsed_uri = reqwest::Url::parse(uri).context("backend URL is invalid")?;
 
         let resolved = resolve_headers(&definition.headers)?;
         let mut headers = HashMap::new();
@@ -43,9 +47,16 @@ impl BackendConnector for StreamableHttpConnector {
                 .startup_timeout_seconds
                 .unwrap_or(defaults.runtime.startup_timeout_seconds),
         );
-        let client = reqwest::Client::builder()
+        let mut client_builder = reqwest::Client::builder()
             .connect_timeout(connection_timeout)
-            .redirect(reqwest::redirect::Policy::none())
+            .redirect(reqwest::redirect::Policy::none());
+        // A machine-wide proxy must never intercept local MCP traffic. This is
+        // also deterministic when CI environments provide conflicting proxy
+        // and NO_PROXY variables.
+        if parsed_uri.host_str().is_some_and(is_loopback_host) {
+            client_builder = client_builder.no_proxy();
+        }
+        let client = client_builder
             .build()
             .context("could not create backend HTTP client")?;
         let config = StreamableHttpClientTransportConfig::with_uri(uri.to_owned())
