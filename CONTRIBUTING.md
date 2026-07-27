@@ -24,6 +24,17 @@ cargo test --all
 cargo build --release
 ```
 
+The suite is deliberately layered so failures are easy to locate:
+
+- **Unit:** `cargo test --lib` covers isolated parsing, routing, security,
+  configuration, redaction, and rendering behavior.
+- **Functional:** `cargo test --test runtime_e2e` runs real stdio and HTTP MCP
+  fixtures without external accounts.
+- **Automated user journeys:** `cargo test --test cli_behavior --test user_journey`
+  executes the built CLI through safe preview/apply workflows.
+- **Full regression:** `cargo test --all` runs every layer and documentation
+  test on all supported CI operating systems.
+
 Tests must not require real Tailscale, ngrok, Cloudflare, or OpenAI accounts.
 Provider and service operations should be exercised through command plans and
 fake process executors.
@@ -34,6 +45,24 @@ fake process executors.
 - Explain user-visible configuration or protocol changes.
 - Add focused tests for behavior changes.
 - Avoid drive-by formatting and unrelated refactors.
+
+## Issues and pull requests
+
+1. Search existing issues, then use the bug or feature issue form. Use the
+   security policy instead of a public issue for vulnerabilities.
+2. Fork from `main`, create a focused branch, and include tests and docs with
+   behavior changes.
+3. Open a pull request using the repository template. Link its issue with a
+   closing keyword when appropriate and complete every applicable checkbox.
+4. CI must pass, conversations must be resolved, and at least one maintainer
+   must approve before squash-merging. Maintainers should require the `CI /`
+   checks through branch protection.
+5. Prefer Conventional Commit-style subjects (`feat:`, `fix:`, `docs:`,
+   `test:`, `ci:`) and keep the first line concise.
+
+Small documentation corrections may be submitted directly as a pull request.
+Changes to the protocol boundary, dependencies, or security model should begin
+with a feature issue and, when architectural, an ADR in `docs/adr/`.
 
 ## Maintainer release process
 

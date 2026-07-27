@@ -14,7 +14,8 @@ use rmcp::{
     model::{CallToolRequestParams, ClientInfo},
     transport::{
         StreamableHttpClientTransport, StreamableHttpServerConfig, StreamableHttpService,
-        TokioChildProcess, streamable_http_server::session::local::LocalSessionManager,
+        TokioChildProcess, streamable_http_client::StreamableHttpClientTransportConfig,
+        streamable_http_server::session::local::LocalSessionManager,
     },
 };
 use serde_json::{Map, json};
@@ -180,7 +181,7 @@ async fn http_frontend_lists_and_calls_the_shared_catalog() -> Result<()> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let frontend = streamable_http::start_with_listener(runtime.clone(), listener)?;
     let url = format!("http://{}/mcp", frontend.address);
-    let http = reqwest::Client::new();
+    let http = reqwest::Client::builder().no_proxy().build()?;
     assert!(
         http.get(format!("http://{}/healthz", frontend.address))
             .send()
@@ -212,9 +213,11 @@ async fn http_frontend_lists_and_calls_the_shared_catalog() -> Result<()> {
         .send()
         .await?;
     assert!(control.status().is_success());
-    let client = ClientInfo::default()
-        .serve(StreamableHttpClientTransport::from_uri(url))
-        .await?;
+    let transport = StreamableHttpClientTransport::with_client(
+        reqwest::Client::builder().no_proxy().build()?,
+        StreamableHttpClientTransportConfig::with_uri(url),
+    );
+    let client = ClientInfo::default().serve(transport).await?;
 
     let tools = client.list_all_tools().await?;
     assert_eq!(tools.len(), 1);
