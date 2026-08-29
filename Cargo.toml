@@ -23,8 +23,8 @@ futures = "0.3.31"
 http = "1.4.0"
 is-terminal = "0.4.17"
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
-reqwest = { version = "=0.13.2", default-features = false, features = ["json", "native-tls"] }
-rmcp = { version = "=2.2.0", features = [
+reqwest = { version = "=0.13.4", default-features = false, features = ["json", "native-tls"] }
+rmcp = { version = "=3.1.4", features = [
     "client",
     "server",
     "transport-child-process",
