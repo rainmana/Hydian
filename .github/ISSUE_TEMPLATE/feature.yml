@@ -1,0 +1,39 @@
+name: Feature proposal
+description: Propose a focused improvement to Hydian
+title: "feat: "
+labels: [enhancement, needs-triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem should Hydian solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe behavior and CLI or configuration changes.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and risks
+      description: Note security, compatibility, testing, and migration considerations.
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Project boundary
+      options:
+        - label: I reviewed the v0.1 boundary and roadmap.
+          required: true
+        - label: I searched for an existing proposal.
+          required: true

@@ -1,0 +1,21 @@
+:root {
+  --links: #2176ae;
+}
+
+@media (prefers-color-scheme: dark) {
+  .light:not([data-theme]),
+  :root:not([data-theme]) {
+    --bg: #10141c;
+    --fg: #e8edf5;
+    --sidebar-bg: #151b26;
+    --sidebar-fg: #d7deea;
+    --links: #73c7ff;
+    --quote-bg: #182332;
+    --quote-border: #4ba3d3;
+  }
+}
+
+.menu-title {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}

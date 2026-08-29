@@ -1,0 +1,17 @@
+[book]
+title = "Hydian Documentation"
+description = "Operating and contributing documentation for the Hydian MCP multiplexer"
+authors = ["Hydian contributors"]
+src = "docs"
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+additional-css = ["docs/theme/hydian.css"]
+git-repository-url = "https://github.com/rainmana/Hydian"
+edit-url-template = "https://github.com/rainmana/Hydian/edit/main/docs/{path}"
+site-url = "/Hydian/"

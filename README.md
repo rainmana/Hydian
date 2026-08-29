@@ -12,6 +12,14 @@ Hydian is not an MCP marketplace, an identity provider, a hosted service, an
 enterprise policy platform, or a replacement for MCP servers. It does not
 require Docker or a language runtime other than the Hydian executable itself.
 
+## Why “Hydian”?
+
+The name is inspired by the **Hydian Way**, the major hyperspace route in
+*Star Wars* that connects otherwise distant systems. In the same spirit,
+Hydian provides one dependable route to a collection of independent MCP
+servers. The project is unofficial and is not affiliated with or endorsed by
+Lucasfilm or Disney.
+
 > **Project status:** v0.1 is implemented but not yet published. Treat the
 > configuration surface as pre-release until a tagged release exists.
 
@@ -56,6 +64,10 @@ operation uses `hydian serve`; command-oriented MCP clients can launch
 - No database, built-in HTTPS termination, web UI, or bundled tunnel agent.
 
 The detailed design is in [docs/architecture.md](docs/architecture.md).
+
+The complete documentation is also maintained as an mdBook-compatible site in
+[`docs/`](docs/SUMMARY.md). Every Markdown change is previewable locally with
+`mdbook serve --open`, and `main` is published automatically to GitHub Pages.
 
 ## Client configuration
 
@@ -155,3 +167,9 @@ Licensed under either of:
 - MIT License
 
 at your option.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, test
+layers, issue triage, pull-request checklist, and release process. Bug reports
+and feature proposals use the repository's structured GitHub issue forms.
